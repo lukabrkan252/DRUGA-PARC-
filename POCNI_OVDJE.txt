@@ -1,19 +1,14 @@
-MO PLANIRANJE - kako pokrenuti (NISTA SE NE INSTALIRA)
-=======================================================
-Isti zip raspakujte na SVAKOM racunaru (npr. u C:\MO_planiranje). Jedan racunar je SERVER, ostali su KLIJENTI.
-Zip vec sadrzi sve sto aplikaciji treba (i Python) - nista dodatno ne skidate.
+MO PLANIRANJE - NISTA SE NE INSTALIRA, JEDAN KLIK
+==================================================
+1. Raspakujte zip (desni klik -> Extract All) bilo gdje, npr. na Desktop.
+2. Dvaput kliknite  POKRENI-OVO.cmd
+3. Na pitanje pritisnite:
+     S  = ovo je SERVER (JEDAN racunar, onaj sa Excelom i SAP vezom; potvrdite vatrozid sa "Da")
+     K  = ovo je KLIJENT (poslovodja / operater); upisite adresu servera (npr. 192.168.0.50:8000)
+4. Aplikacija se kopira u C:\MO_planiranje, na Desktopu nastane ikona "MO planiranje" i aplikacija se otvori.
+   Odsad koristite samo ikonu.
 
-1) SERVER (jedan racunar, na kojem je Microsoft Excel sa radnom SAP vezom kao do sada):
-   - Otvorite folder windows i dvaput kliknite  Napravi_ikonu_na_desktopu.bat
-   - Pritisnite S (server), potvrdite vatrozid (Da).
-   - Dvaput kliknite ikonu "MO planiranje" na Desktopu. Aplikacija se otvori u pregledniku.
-   - Adresa servera je u fajlu  adresa_servera.txt  (npr. 192.168.0.50:8000) - nju upisujete na klijentima.
-   - Server racunar mora biti upaljen i prijavljen. Excel fajlove iz foldera data NE otvarati dok server radi.
-
-2) KLIJENTI (poslovodja, operateri):
-   - Otvorite folder windows i dvaput kliknite  Napravi_ikonu_na_desktopu.bat
-   - Pritisnite K (klijent), upisite adresu servera.
-   - Ikona "MO planiranje" otvara aplikaciju. Svi vide iste podatke.
-
+Adresa servera je u fajlu C:\MO_planiranje\adresa_servera.txt (nakon prvog pokretanja na serveru).
+Server mora biti upaljen i prijavljen. Excel fajlove u data\ ne otvarati dok server radi.
 PIN: poslovodja 1234; operateri 1001, 1002... (mijenja se u Postavke).
-Podaci se iz SAP-a osvjezavaju automatski svakih 5 minuta (server u pozadini otvori Excel i osvjezi upite).
+Podaci se iz SAP-a osvjezavaju automatski svakih 5 minuta.

@@ -7,7 +7,7 @@ OUT = os.path.join(ROOT, "MO_planiranje.zip")
 PY_URL = "https://api.nuget.org/v3-flatcontainer/python/3.12.8/python.3.12.8.nupkg"
 TOP = "MO_planiranje/"
 APP_FILES = ["app", "assets/icon.ico", "assets/icon.png", "queries", "windows", "data/nalozi.xlsx",
-             "data/preostala_norma.xlsx", "requirements.txt", "POCNI_OVDJE.txt"]
+             "data/preostala_norma.xlsx", "requirements.txt", "POCNI_OVDJE.txt", "POKRENI-OVO.cmd"]
 
 tmp = tempfile.mkdtemp()
 wheels = os.path.join(tmp, "wheels")
