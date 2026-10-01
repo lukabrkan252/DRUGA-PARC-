@@ -10,52 +10,26 @@ NORM_COLS = ["PROJEKT", "Glavni nalog KPL", "RN", "Linija", "ItemCode", "NazivPr
 
 
 def _clean(v):
-    import pandas as pd
-    if v is None or (not hasattr(v, "__len__") and pd.isna(v)):
-        return None
     if hasattr(v, "isoformat"):
         return v.isoformat()[:10]
     return v
 
 
+REFRESH_PS1 = os.path.join(config.BASE, "windows", "osvjezi_excel.ps1")
+
+
 def refresh_workbook(path):
-    """Otvori Excel u pozadini, osvjezi sve veze (Power Query -> SAP, tvojim Windows pristupom), sacuvaj i zatvori."""
-    import pythoncom  # type: ignore
-    import win32com.client  # type: ignore
-    pythoncom.CoInitialize()
-    xl = win32com.client.DispatchEx("Excel.Application")
-    try:
-        xl.Visible = False
-        xl.DisplayAlerts = False
-        wb = xl.Workbooks.Open(os.path.abspath(path), UpdateLinks=0)
-        for c in wb.Connections:  # osvjezavanje mora biti sinhrono
-            try:
-                c.OLEDBConnection.BackgroundQuery = False
-            except Exception:
-                pass
-        for ws in wb.Worksheets:
-            for lo in ws.ListObjects:
-                try:
-                    lo.QueryTable.BackgroundQuery = False
-                except Exception:
-                    pass
-        wb.RefreshAll()
-        xl.CalculateUntilAsyncQueriesDone()
-        wb.Save()
-        wb.Close(False)
-    finally:
-        xl.Quit()
-        pythoncom.CoUninitialize()
+    """Excel se u pozadini otvori preko PowerShella, osvjezi sve veze (Power Query -> SAP, Windows pristupom
+    korisnika), sacuva i zatvori. Ne treba nikakav dodatni program osim Excela."""
+    import subprocess
+    r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", REFRESH_PS1, path],
+                       capture_output=True, text=True, timeout=900)
+    if r.returncode != 0:
+        raise RuntimeError(f"Excel osvjezavanje nije uspjelo ({os.path.basename(path)}): {(r.stdout + r.stderr).strip()[-300:]}")
 
 
 def can_refresh():
-    if not config.EXCEL_REFRESH or os.name != "nt":
-        return False
-    try:
-        import win32com.client  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    return config.EXCEL_REFRESH and os.name == "nt" and os.path.exists(REFRESH_PS1)
 
 
 class ExcelSource:
@@ -69,16 +43,21 @@ class ExcelSource:
 
     @staticmethod
     def _read(path, cols):
-        import pandas as pd
-        xl = pd.ExcelFile(path)
-        sheets = ["Query_novo"] + [s for s in xl.sheet_names if s != "Query_novo"]
-        for s in sheets:
-            if s in xl.sheet_names:
-                head = xl.parse(s, nrows=0)
-                if all(c in head.columns for c in cols):
-                    df = xl.parse(s, usecols=cols)
-                    return [{k: _clean(v) for k, v in r.items()} for r in df.to_dict("records")]
-        raise ValueError(f"{os.path.basename(path)}: nije nadjen sheet sa kolonama {cols}")
+        from openpyxl import load_workbook
+        wb = load_workbook(path, read_only=True, data_only=True)
+        try:
+            names = ["Query_novo"] + [n for n in wb.sheetnames if n != "Query_novo"]
+            for n in names:
+                if n not in wb.sheetnames:
+                    continue
+                rows = wb[n].iter_rows(values_only=True)
+                head = next(rows, None) or ()
+                if all(c in head for c in cols):
+                    idx = {c: head.index(c) for c in cols}
+                    return [{c: _clean(r[i]) for c, i in idx.items()} for r in rows if any(v is not None for v in r)]
+            raise ValueError(f"{os.path.basename(path)}: nije nadjen sheet sa kolonama {cols}")
+        finally:
+            wb.close()
 
     def fetch(self):
         if can_refresh():
