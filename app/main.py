@@ -3,7 +3,7 @@ import json
 import os
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -87,9 +87,20 @@ def me(u=Depends(current_user)):
     return {k: u[k] for k in ("id", "name", "role", "machine_id")}
 
 
+def cur_week():
+    y, w, _d = date.today().isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def week_capacity(db, mid, week):
+    r = db.execute("SELECT hours FROM capacity WHERE machine_id=? AND week=?", (mid, week)).fetchone()
+    return r[0] if r else 0
+
+
 # ---------- masine ----------
 @app.get("/api/machines")
-def machines(u=Depends(current_user), db=Depends(get_db)):
+def machines(week: str | None = None, u=Depends(current_user), db=Depends(get_db)):
+    week = week or cur_week()
     q = "SELECT * FROM machines WHERE enabled=1"
     args = ()
     if u["role"] != "boss":
@@ -98,6 +109,7 @@ def machines(u=Depends(current_user), db=Depends(get_db)):
     out = []
     for m in db.execute(q + " ORDER BY sort", args):
         d = dict(m)
+        d["capacity_h"] = week_capacity(db, m["id"], week)
         d["published_at"] = (db.execute("SELECT published_at FROM publications WHERE machine_id=?", (m["id"],)).fetchone() or [None])[0]
         d["pending"] = db.execute("SELECT COUNT(*) FROM reports WHERE machine_id=? AND status='pending'", (m["id"],)).fetchone()[0]
         out.append(d)
@@ -105,19 +117,28 @@ def machines(u=Depends(current_user), db=Depends(get_db)):
 
 
 class MachinePatch(BaseModel):
-    capacity_h: float | None = None
     label: str | None = None
     enabled: bool | None = None
 
 
 @app.patch("/api/machines/{mid}")
 def patch_machine(mid: int, body: MachinePatch, _=Depends(boss), db=Depends(get_db)):
-    if body.capacity_h is not None:
-        db.execute("UPDATE machines SET capacity_h=? WHERE id=?", (max(body.capacity_h, 0), mid))
     if body.label:
         db.execute("UPDATE machines SET label=? WHERE id=?", (body.label, mid))
     if body.enabled is not None:
         db.execute("UPDATE machines SET enabled=? WHERE id=?", (int(body.enabled), mid))
+    return {"ok": True}
+
+
+class Capacity(BaseModel):
+    week: str  # npr. 2026-W40
+    hours: float
+
+
+@app.put("/api/machines/{mid}/capacity")
+def set_capacity(mid: int, body: Capacity, _=Depends(boss), db=Depends(get_db)):
+    db.execute("INSERT INTO capacity VALUES(?,?,?) ON CONFLICT(machine_id,week) DO UPDATE SET hours=excluded.hours",
+               (mid, body.week, max(body.hours, 0)))
     return {"ok": True}
 
 
@@ -179,13 +200,16 @@ def machine_items(db, mid):
 
 
 @app.get("/api/plan/{mid}")
-def get_plan(mid: int, _=Depends(boss), db=Depends(get_db)):
+def get_plan(mid: int, week: str | None = None, _=Depends(boss), db=Depends(get_db)):
+    week = week or cur_week()
     m = db.execute("SELECT * FROM machines WHERE id=?", (mid,)).fetchone()
     if not m:
         raise HTTPException(404)
-    rows, summary = compute_plan(machine_items(db, mid), m["capacity_h"])
-    pub = db.execute("SELECT published_at FROM publications WHERE machine_id=?", (mid,)).fetchone()
-    return {"machine": dict(m), "rows": rows, "summary": summary, "published_at": pub[0] if pub else None}
+    cap = week_capacity(db, mid, week)
+    rows, summary = compute_plan(machine_items(db, mid), cap)
+    pub = db.execute("SELECT published_at, week FROM publications WHERE machine_id=?", (mid,)).fetchone()
+    return {"machine": {**dict(m), "capacity_h": cap}, "week": week, "rows": rows, "summary": summary,
+            "published_at": pub[0] if pub else None, "published_week": pub[1] if pub else None}
 
 
 class Order(BaseModel):
@@ -232,15 +256,15 @@ def split(body: Split, _=Depends(boss), db=Depends(get_db)):
 
 
 @app.post("/api/plan/{mid}/publish")
-def publish(mid: int, _=Depends(boss), db=Depends(get_db)):
-    m = db.execute("SELECT * FROM machines WHERE id=?", (mid,)).fetchone()
-    rows, _s = compute_plan(machine_items(db, mid), m["capacity_h"])
+def publish(mid: int, week: str | None = None, _=Depends(boss), db=Depends(get_db)):
+    week = week or cur_week()
+    rows, _s = compute_plan(machine_items(db, mid), week_capacity(db, mid, week))
     green = [r for r in rows if r["status"] in ("green", "none")]
     db.execute("DELETE FROM published WHERE machine_id=?", (mid,))
     for i, r in enumerate(green, 1):
         db.execute("INSERT INTO published VALUES(?,?,?,?,?)", (mid, i, r["rn"], r["linija"], r["part_qty"]))
     t = now()
-    db.execute("INSERT INTO publications VALUES(?,?) ON CONFLICT(machine_id) DO UPDATE SET published_at=excluded.published_at", (mid, t))
+    db.execute("INSERT INTO publications VALUES(?,?,?) ON CONFLICT(machine_id) DO UPDATE SET published_at=excluded.published_at, week=excluded.week", (mid, t, week))
     return {"published": len(green), "published_at": t}
 
 
@@ -280,7 +304,8 @@ def operator_plan(machine_id: int | None = None, u=Depends(current_user), db=Dep
     hist = [dict(r) for r in db.execute("""SELECT r.*, us.name operator, l.naziv FROM reports r
         JOIN users us ON us.id=r.user_id LEFT JOIN lines l ON l.rn=r.rn AND l.linija=r.linija
         WHERE r.machine_id=? ORDER BY r.id DESC LIMIT 15""", (mid,))]
-    return {"machine": dict(m), "published_at": at, "rows": rows, "history": hist}
+    wk = db.execute("SELECT week FROM publications WHERE machine_id=?", (mid,)).fetchone()
+    return {"machine": dict(m), "published_at": at, "week": wk[0] if wk else None, "rows": rows, "history": hist}
 
 
 class Report(BaseModel):
@@ -327,7 +352,7 @@ def alerts(_=Depends(boss), db=Depends(get_db)):
 # ---------- sinhronizacija ----------
 @app.get("/api/status")
 def status(_=Depends(current_user), db=Depends(get_db)):
-    return {"last_sync": dbm.get_meta(db, "last_sync"), "last_error": dbm.get_meta(db, "last_error"),
+    return {"current_week": cur_week(), "last_sync": dbm.get_meta(db, "last_sync"), "last_error": dbm.get_meta(db, "last_error"),
             "source": get_source().name, "interval_sec": config.SYNC_INTERVAL_SEC}
 
 

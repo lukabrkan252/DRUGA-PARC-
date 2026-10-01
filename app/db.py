@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS lines(
 CREATE TABLE IF NOT EXISTS plan(
   rn INTEGER, linija INTEGER, machine_id INTEGER, position REAL, split_qty REAL,
   PRIMARY KEY(rn, linija));
-CREATE TABLE IF NOT EXISTS publications(machine_id INTEGER PRIMARY KEY, published_at TEXT);
+CREATE TABLE IF NOT EXISTS publications(machine_id INTEGER PRIMARY KEY, published_at TEXT, week TEXT);
+CREATE TABLE IF NOT EXISTS capacity(machine_id INTEGER, week TEXT, hours REAL, PRIMARY KEY(machine_id, week));
 CREATE TABLE IF NOT EXISTS published(
   machine_id INTEGER, seq INTEGER, rn INTEGER, linija INTEGER, qty REAL);
 CREATE TABLE IF NOT EXISTS reports(
@@ -76,6 +77,10 @@ def add_machine(db, sap_name, label=None):
 def init_db(path=None):
     with session(path) as db:
         db.executescript(SCHEMA)
+        try:
+            db.execute("ALTER TABLE publications ADD COLUMN week TEXT")
+        except Exception:
+            pass  # kolona vec postoji
         if not db.execute("SELECT 1 FROM users WHERE role='boss'").fetchone():
             db.execute("INSERT INTO users(name,pin,role) VALUES('Poslovođa MO',?, 'boss')", (config.BOSS_PIN,))
         if not db.execute("SELECT 1 FROM machines").fetchone():

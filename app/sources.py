@@ -43,22 +43,23 @@ class ExcelSource:
 
 
 class SqlSource:
-    """Query-ji se citaju iz .sql fajlova; nazivi kolona moraju biti isti kao u Excel exportima."""
+    """Direktno iz SAP B1 baze (MS SQL). SQL je isti kao u Power Query-ju iz Excela (queries/*.sql)."""
     name = "sql"
 
     def signature(self):
         return None  # uvijek povuci svjeze
 
     def _query(self, sql_path):
-        if config.SAP_DRIVER == "hdbcli":
-            from hdbcli import dbapi  # type: ignore
-            conn = dbapi.connect(**dict(p.split("=", 1) for p in config.SAP_CONN.split(";") if p))
-        else:
-            import pyodbc  # type: ignore
-            conn = pyodbc.connect(config.SAP_CONN)
+        import pymssql  # type: ignore
+        conn = pymssql.connect(server=config.SQL_HOST, port=config.SQL_PORT, user=config.SQL_USER,
+                               password=config.SQL_PASSWORD, database=config.SQL_DB, login_timeout=15, timeout=120)
         try:
             cur = conn.cursor()
+            cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED")  # samo citanje, ne smetamo SAP-u
+            cur.execute("SET NOCOUNT ON")
             cur.execute(open(sql_path, encoding="utf-8").read())
+            while cur.description is None and cur.nextset():  # preskoci CREATE/INSERT #temp dijelove
+                pass
             cols = [d[0] for d in cur.description]
             return [{c: _clean(v) for c, v in zip(cols, row)} for row in cur.fetchall()]
         finally:
@@ -69,4 +70,4 @@ class SqlSource:
 
 
 def get_source():
-    return SqlSource() if config.SAP_CONN else ExcelSource()
+    return SqlSource() if config.SQL_USER else ExcelSource()

@@ -10,9 +10,12 @@ ACTIVE_STATUSES = {s.strip() for s in os.getenv("ACTIVE_STATUSES", "Otvoren").sp
 ALERT_AFTER_MIN = int(os.getenv("ALERT_AFTER_MIN", "30"))
 BOSS_PIN = os.getenv("BOSS_PIN", "1234")
 
-# SAP/SQL izvor (ako je SAP_CONN postavljen, koristi se umjesto Excela)
-SAP_DRIVER = os.getenv("SAP_DRIVER", "pyodbc")  # pyodbc | hdbcli
-SAP_CONN = os.getenv("SAP_CONN", "")
+# SAP B1 (MS SQL Server). Ako je SQL_USER postavljen, aplikacija vuce direktno iz baze umjesto iz Excela.
+SQL_HOST = os.getenv("SQL_HOST", "192.168.0.45")
+SQL_PORT = int(os.getenv("SQL_PORT", "1433"))
+SQL_DB = os.getenv("SQL_DB", "SBO_GS-TMT_PROD")
+SQL_USER = os.getenv("SQL_USER", "")
+SQL_PASSWORD = os.getenv("SQL_PASSWORD", "")  # samo preko env varijable, nikad u kodu
 ORDERS_SQL = os.getenv("ORDERS_SQL", "queries/nalozi.sql")
 NORMS_SQL = os.getenv("NORMS_SQL", "queries/preostala_norma.sql")
 

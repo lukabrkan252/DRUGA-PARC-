@@ -1,5 +1,10 @@
 const $app = document.getElementById('app');
-let token = localStorage.getItem('token'), me = null, machines = [], cur = null, timer = null;
+let token = localStorage.getItem('token'), me = null, machines = [], cur = null, timer = null, week = null;
+function isoWeek(d) { d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = d.getUTCDay() || 7; d.setUTCDate(d.getUTCDate() + 4 - day);
+  const y = d.getUTCFullYear(), w = Math.ceil(((d - Date.UTC(y, 0, 1)) / 864e5 + 1) / 7); return `${y}-W${String(w).padStart(2, '0')}`; }
+function shiftWeek(wk, n) { const [y, w] = wk.split('-W').map(Number); const j4 = new Date(Date.UTC(y, 0, 4)); const mon = new Date(j4); mon.setUTCDate(j4.getUTCDate() - ((j4.getUTCDay() || 7) - 1) + (w - 1 + n) * 7);
+  return isoWeek(new Date(mon.getUTCFullYear(), mon.getUTCMonth(), mon.getUTCDate())); }
+const fmtW = wk => 'KW ' + wk.slice(6) + '/' + wk.slice(0, 4);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmtD = s => s ? s.slice(8,10)+'.'+s.slice(5,7)+'.'+s.slice(0,4) : '–';
 const fmtH = m => (m/60).toLocaleString('bs',{maximumFractionDigits:1})+' h';
@@ -31,7 +36,8 @@ function loginView() {
 
 async function start() {
   try { me = await api('/me'); } catch { return loginView(); }
-  machines = await api('/machines');
+  week = week || isoWeek(new Date());
+  machines = await api('/machines?week=' + week);
   cur = me.role === 'boss' ? (cur && machines.find(m => m.id === cur) ? cur : machines[0]?.id) : me.machine_id;
   render();
   clearInterval(timer); timer = setInterval(() => { if (!document.activeElement || document.activeElement.tagName !== 'INPUT') render(true); }, 30000);
@@ -39,13 +45,14 @@ async function start() {
 
 async function render() {
   if (!me) return;
-  machines = await api('/machines');
+  week = week || isoWeek(new Date());
+  machines = await api('/machines?week=' + week);
   return me.role === 'boss' ? bossView() : operatorView();
 }
 
 /* ---------------- POSLOVODJA ---------------- */
 async function bossView() {
-  const [plan, alerts, st] = await Promise.all([api('/plan/' + cur), api('/alerts'), api('/status')]);
+  const [plan, alerts, st] = await Promise.all([api(`/plan/${cur}?week=${week}`), api('/alerts'), api('/status')]);
   const m = plan.machine, S = plan.summary;
   const overdue = alerts.filter(a => a.overdue);
   const tabs = machines.map(x => `<div class="tab ${x.id===cur?'on':''}" data-m="${x.id}">${esc(x.label)}${x.pending?`<span class="badge">${x.pending}</span>`:''}</div>`).join('');
@@ -60,12 +67,13 @@ async function bossView() {
    ${alerts.length ? `<div class="alert"><b>${overdue.length ? '⚠ Operater je čekirao, a u SAP-u nije proknjiženo:' : 'Čeka potvrdu iz SAP-a:'}</b><br>` +
      alerts.map(a => `<span class="${a.overdue?'err':'mut'}">${esc(a.operator)} · ${esc(a.machine)} · RN ${a.rn}/${a.linija} · ${fmtN(a.qty)} kom · prije ${a.age_min} min${a.overdue?' – NIJE U SAP-u':''}</span>`).join('<br>') + '</div>' : ''}
    <div class="bar">
-     <label>Kapacitet (h za ${esc(m.label)}) <input id="cap" type="number" min="0" step="0.5" value="${m.capacity_h||''}" style="width:90px"></label>
+     <span><button class="sm" id="wp">◀</button> <b>${fmtW(week)}</b> <button class="sm" id="wn">▶</button></span>
+     <label>Kapacitet ${esc(m.label)} u ${fmtW(week)} (h) <input id="cap" type="number" min="0" step="0.5" value="${m.capacity_h||''}" style="width:90px"></label>
      <div class="meter"><i style="width:${pct}%"></i></div>
      <b>${fmtH(S.green_min)} / ${S.capacity_min ? fmtH(S.capacity_min) : '—'}</b>
      <span class="mut">ukupno na mašini: ${fmtH(S.total_min)}</span>
      <button class="pri" id="pub">Objavi plan operateru</button>
-     <span class="mut">${plan.published_at ? 'objavljeno ' + fmtT(plan.published_at) : 'nije objavljeno'}</span>
+     <span class="mut">${plan.published_at ? 'objavljeno ' + fmtT(plan.published_at) + (plan.published_week ? ' za ' + fmtW(plan.published_week) : '') : 'nije objavljeno'}</span>
    </div>
    <div class="tw"><table><thead><tr><th>#</th><th>RN pozicije</th><th>RN KPL</th><th>Naziv</th><th>Projekt</th><th>Datum heftanja</th><th>Datum isporuke</th><th class="num">Kom</th><th class="num">Norma</th><th>Akcije</th></tr></thead>
    <tbody id="rows">${plan.rows.map((r,i) => rowHtml(r,i)).join('') || '<tr><td colspan="10" class="mut">Nema aktivnih linija za ovu mašinu.</td></tr>'}</tbody></table></div>
@@ -73,8 +81,9 @@ async function bossView() {
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => { cur = +t.dataset.m; render(); });
   out.onclick = logout; sync.onclick = async () => { sync.disabled = true; sync.textContent = 'Osvježavam…'; try { await post('/sync'); } finally { render(); } };
   adm.onclick = adminView;
-  cap.onchange = async () => { await patch('/machines/' + cur, {capacity_h: +cap.value || 0}); render(); };
-  pub.onclick = async () => { const r = await post('/plan/' + cur + '/publish'); alert(`Objavljeno ${r.published} linija operateru.`); render(); };
+  wp.onclick = () => { week = shiftWeek(week, -1); render(); }; wn.onclick = () => { week = shiftWeek(week, 1); render(); };
+  cap.onchange = async () => { await api(`/machines/${cur}/capacity`, {method: 'PUT', body: {week, hours: +cap.value || 0}}); render(); };
+  pub.onclick = async () => { const r = await post(`/plan/${cur}/publish?week=${week}`); alert(`Objavljeno ${r.published} linija operateru.`); render(); };
   wireRows(plan);
 }
 
@@ -146,7 +155,7 @@ async function adminView() {
 async function operatorView() {
   const d = await api('/operator/plan');
   const stIcon = s => s === 'confirmed' ? '<span class="ok">✔ u SAP-u</span>' : '<span class="pend">⏳ čeka SAP</span>';
-  $app.innerHTML = `<header><h1>${esc(d.machine.label)} – ${esc(me.name)}</h1><span class="mut">plan objavljen: ${fmtT(d.published_at)}</span><button id="out">Odjava</button></header><main>
+  $app.innerHTML = `<header><h1>${esc(d.machine.label)} – ${esc(me.name)}</h1><span class="mut">plan ${d.week ? fmtW(d.week) + ' · ' : ''}objavljen: ${fmtT(d.published_at)}</span><button id="out">Odjava</button></header><main>
    ${d.published_at ? '' : '<p class="mut">Poslovođa još nije objavio plan.</p>'}
    ${d.rows.map((r, i) => `<div class="card ${r.left <= 0 ? 'done' : ''}">
       <div style="font-size:22px;font-weight:700">${i+1}</div>
