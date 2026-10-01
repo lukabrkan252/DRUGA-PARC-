@@ -9,4 +9,4 @@ if /i "%MODE%"=="server" powershell -NoProfile -Command "$s=(New-Object -ComObje
 echo.
 echo Ikona "MO planiranje" je napravljena na Desktopu.
 if /i "%MODE%"=="server" echo Server se od sada pokrece automatski kad se ovaj racunar upali i prijavite se.
-pause
+if /i not "%~1"=="/nopause" pause
