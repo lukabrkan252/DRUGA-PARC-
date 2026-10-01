@@ -2,6 +2,4 @@ fastapi
 uvicorn
 pandas
 openpyxl
-pytest
-httpx
-pymssql
+pywin32; sys_platform == "win32"
